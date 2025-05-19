@@ -1,0 +1,60 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-05-19 16:24+0200\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: Poedit 3.6\n"
+"X-Poedit-Basepath: ..\n"
+"X-Poedit-SearchPath-0: plugin.py\n"
+
+#: plugin.py:536
+msgid "Switch 4/9"
+msgstr ""
+
+#: plugin.py:537
+msgid "Pause"
+msgstr ""
+
+#: plugin.py:600
+msgid "CH+/CH- : countdown to next screen in secs (3-30)\n"
+msgstr ""
+
+#: plugin.py:601
+msgid "Green   : play Mosaic\n"
+msgstr ""
+
+#: plugin.py:602
+msgid "Yellow  : pause Mosaic\n"
+msgstr ""
+
+#: plugin.py:603
+msgid "Blue    : toggle 9/4 screens\n"
+msgstr ""
+
+#: plugin.py:604
+msgid "1-9(4)  : switch to screen 1-9(4) and leave\n"
+msgstr ""
+
+#: plugin.py:605
+msgid "OK      : switch to current screen and leave\n"
+msgstr ""
+
+#: plugin.py:606
+msgid "Exit    : leave to previously service\n"
+msgstr ""
+
+#: plugin.py:607
+msgid "Help    : this help"
+msgstr ""

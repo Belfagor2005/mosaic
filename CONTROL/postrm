@@ -1,0 +1,5 @@
+#!/bin/sh
+echo ""
+echo ""
+rm -rf /usr/lib/enigma2/python/Plugins/Extensions/mosaic
+exit 0

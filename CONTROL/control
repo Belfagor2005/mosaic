@@ -1,0 +1,7 @@
+Package: enigma2-plugin-extensions-mosaic
+Version: 2.1-r0
+Description: Shows you screenshots of the services in a selected bouquet
+Maintainer: OpenPLi team <forum@openpli.org>; Lululla
+Homepage: http://www.openpli.org
+Depends: 
+Source: enigma2-plugin-extensions-mosaic

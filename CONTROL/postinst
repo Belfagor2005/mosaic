@@ -1,0 +1,7 @@
+#!/bin/sh
+echo "*                               *"
+echo "* Plugins installed successfully *"
+echo "*                               *"
+echo "* E2 restart is required        *"
+echo "* *"
+exit
