@@ -1,0 +1,9 @@
+<setupxml>
+	<setup key="MosaicSettings" title="Mosaic Settings">
+		<item level="0" text="Interval screenshots" description="Interval between automatic screenshots.">config.plugins.Mosaic.countdown</item>
+		<item level="0" text="Number of previews displayed" description="Number of channel previews displayed.">config.plugins.Mosaic.howmanyscreens</item>
+		<item level="0" text="Folder for screenshot temporaly" description="Set folder for screenshot temporaly.">config.plugins.Mosaic.userfolder</item>
+	</setup>
+</setupxml>
+
+

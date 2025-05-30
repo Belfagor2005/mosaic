@@ -19,14 +19,15 @@ from Components.ActionMap import NumberActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 from Components.VideoWindow import VideoWindow
-from Components.config import ConfigInteger, ConfigSubsection, config
+from Components.config import ConfigInteger, ConfigSubsection, config, ConfigText
 from Plugins.Plugin import PluginDescriptor
 from Screens.ChannelSelection import BouquetSelector
 from Screens.MessageBox import MessageBox
 from Screens.Screen import Screen
+from Screens.Setup import Setup
 
-from os import listdir, remove
-from os.path import isfile, join
+from os import makedirs, remove, listdir
+from os.path import isfile, join, exists
 from re import compile, sub, DOTALL
 from sys import stdout
 from time import sleep
@@ -36,13 +37,7 @@ from threading import Lock
 
 from . import _
 from .Console import Console as MyConsole
-from .PicLoader import PicLoader
-
-
-try:
-	from Components.AVSwitch import AVSwitch
-except ImportError:
-	from Components.AVSwitch import eAVControl as AVSwitch
+from .PicLoader import PicLoader, AVSwitch
 
 
 global firstscrennshot
@@ -50,15 +45,21 @@ firstscrennshot = True
 
 grab_binary = "/usr/bin/grab"
 grab_errorlog = "/tmp/mosaic.log"
+SCREENSHOT_DIR = "/tmp/mosaic_screenshots"
 
 config_limits = (3, 30)
 config.plugins.Mosaic = ConfigSubsection()
 config.plugins.Mosaic.countdown = ConfigInteger(default=5, limits=config_limits)
 config.plugins.Mosaic.howmanyscreens = ConfigInteger(default=9)
+config.plugins.Mosaic.userfolder = ConfigText(default=SCREENSHOT_DIR, fixed_size=False)
 
 plugin_name = "Mosaic"
 plugin_description = "Mosaic 9/4 Screens"
 plugin_icon = 'icon.png'
+
+# Create screenshot directory if not exists
+if not exists(SCREENSHOT_DIR):
+	makedirs(SCREENSHOT_DIR)
 
 
 def isFHD():
@@ -217,44 +218,13 @@ def convtext(text=""):
 		return unquote(text)
 
 
-def openMosaic(bouquet):
-	services = getBouquetServices(bouquet)
+class MosaicSettings(Setup):
+	def __init__(self, session, parent=None):
+		Setup.__init__(self, session, setup="MosaicSettings", plugin="Extensions/mosaic")
+		self.parent = parent
 
-	# Validate service list before creating screen
-	if not services or len(services) == 0:
-		Session.open(
-			MessageBox,
-			_("Selected bouquet contains no playable channels"),
-			MessageBox.TYPE_ERROR
-		)
-		return
-
-	# Verify minimum channel count
-	min_channels = 9 if config.plugins.Mosaic.howmanyscreens.value == 9 else 4
-	if len(services) < min_channels:
-		Session.open(
-			MessageBox,
-			_("Bouquet needs at least %d channels for this view") % min_channels,
-			MessageBox.TYPE_INFO
-		)
-
-	Session.openWithCallback(closeBouquetSelectorScreen, Mosaic, services)
-
-
-def getBouquetServices(bouquet):
-	services = []
-	serviceHandler = eServiceCenter.getInstance()
-	servicelist = serviceHandler.list(bouquet)
-
-	if servicelist:
-		service = servicelist.getNext()
-		while service.valid():
-			# Skip directories and markers
-			if not (service.flags & (eServiceReference.isDirectory | eServiceReference.isMarker)):
-				services.append(service)
-			service = servicelist.getNext()
-
-	return services
+	def keySave(self):
+		Setup.keySave(self)
 
 
 class Mosaic(Screen):
@@ -516,99 +486,54 @@ class Mosaic(Screen):
 			skin += """<widget name="count" position="%d,%d" size="%d,20" font="Regular;18" backgroundColor="#ffffff" foregroundColor="#000000" halign="right" />
 			</screen>""" % (positions[2][0], height - 30, windowWidth + 630)
 
-	def __init__(self, session, services, *args):
+	def __init__(self, session, services):
 		Screen.__init__(self, session)
 		self.skin = Mosaic.skin
 		print(f'[Mosaic] Initializing with skin: {self.skin}')
 		self.session = session
-		self.oldService = self.session.nav.getCurrentlyPlayingServiceReference()
 
-		# Dynamic window configuration
-		self.grab_lock = Lock()  # Add mutex lock
-		self.services = services  # Store the list of services
-		self.items_per_page = config.plugins.Mosaic.howmanyscreens.value
-		self.window_config = {
-			4: {
-				'range': range(1, 5),
-				'window_refs_size': 4
-			},
-			9: {
-				'range': range(1, 10),
-				'window_refs_size': 9
-			}
-		}
-
-		# Validate configuration
-		if self.items_per_page not in self.window_config:
-			self.items_per_page = 9  # Default to 9-screen mode
-		window_config = self.window_config[self.items_per_page]  # Renamed to window_config
-		# Initialize window components
-		for i in window_config['range']:  # Use renamed variable
-			self[f"window{str(i)}"] = Pixmap()
-			self[f"video{str(i)}"] = VideoWindow(
-				decoder=0,
-				fb_width=self.width,
-				fb_height=self.height
-			)
-			self[f"video{str(i)}"].hide()
-			self[f"channel{str(i)}"] = Label("")
-			self[f"event{str(i)}"] = Label("")
-			self[f"event{str(i)}"].hide()
-
-		# Initialize window references
-		self.window_refs = [None] * window_config['window_refs_size']  # Use renamed variable
-		self._max_windows = window_config['window_refs_size']  # Use renamed variable
-
-		# Pagination system
-		self.total_pages = max(1, (len(services) + self.items_per_page - 1) // self.items_per_page)
-		self.current_page = 0
-		self.current_window_index = 0  # Track position within current page
-
+		self.consoleCmd = ""
+		self.grab_lock = Lock()
 		self.MyConsoleCmd = ""
 		self.MyConsole = MyConsole(self.session)
 		self.serviceHandler = eServiceCenter.getInstance()
 		self.ref_list = services
 
+		# DEBUG: Verifica il tipo di services
+		print(f"[Mosaic] Services type: {type(services)}")
+		print(f"[Mosaic] Services count: {len(self.ref_list)}")
+
+		# Inizializzazione attributi mancanti
+		self.oldService = self.session.nav.getCurrentlyPlayingServiceReference()
 		self.countdown = config.plugins.Mosaic.countdown.value
 		self.howmanyscreens = config.plugins.Mosaic.howmanyscreens.value
+
+		# Pagination setup
+		self.max_windows = 9 if config.plugins.Mosaic.howmanyscreens.value == 9 else 4
+		self.current_window = 1
+		self.working = False
+		self.state = self.PLAY
+		self.window_refs = [None] * self.max_windows
+		self.current_refidx = 0
 
 		global firstscrennshot
 		firstscrennshot = True
 
 		self.idd = 0
-		self.current_refidx = 0
-		self.current_window = 1
-		self.working = False
-		self.state = self.PLAY
-
 		self._videoWindow = None
 		self.windowWidth = windowWidth
 		self.windowHeight = windowHeight
+		for i in range(1, self.max_windows + 1):
+			self["window" + str(i)] = Pixmap()
+			self["video" + str(i)] = VideoWindow(decoder=0, fb_width=self.width, fb_height=self.height)
+			self["video" + str(i)].hide()
+			self["channel" + str(i)] = Label("")
+			self["event" + str(i)] = Label("")
+			self["event" + str(i)].hide()
 
-		if config.plugins.Mosaic.howmanyscreens.value == 9:
-			for i in range(1, 10):
-				self["window" + str(i)] = Pixmap()
-				self["video" + str(i)] = VideoWindow(decoder=0, fb_width=self.width, fb_height=self.height)
-				self["video" + str(i)].hide()
-				self["channel" + str(i)] = Label("")
-				self["event" + str(i)] = Label("")
-				self["event" + str(i)].hide()
-		else:
-			for i in range(1, 5):
-				self["window" + str(i)] = Pixmap()
-				self["video" + str(i)] = VideoWindow(decoder=0, fb_width=self.width, fb_height=self.height)
-				self["video" + str(i)].hide()
-				self["channel" + str(i)] = Label("")
-				self["event" + str(i)] = Label("")
-				self["event" + str(i)].hide()
-
-		self._max_windows = 9 if config.plugins.Mosaic.howmanyscreens.value == 9 else 4
-		self.window_refs = [None] * self._max_windows
-		print(f'[Mosaic] Operating in {self._max_windows}-window mode')
 		self["video1"].decoder = 0
 		self["video1"].show()
 		self["countdown"] = Label()
-		# self.updateCountdownLabel()
 		self["count"] = Label()
 		self["blue"] = Pixmap()
 		self["yellow"] = Pixmap()
@@ -625,6 +550,7 @@ class Mosaic(Screen):
 				"channelup": self.countdownPlus,
 				"channeldown": self.countdownMinus,
 				"displayHelp": self.showHelp,
+				"menu": self.open_settings,
 				"1": self.numberPressed,
 				"2": self.numberPressed,
 				"3": self.numberPressed,
@@ -650,81 +576,26 @@ class Mosaic(Screen):
 	def isStandardMosaic(self):
 		return self.__class__.__name__ == "Mosaic"
 
-	def toggleScreens(self):
-		"""Switch between 4/9 screen modes"""
-		try:
-			new_mode = 9 if config.plugins.Mosaic.howmanyscreens.value == 4 else 4
-			config.plugins.Mosaic.howmanyscreens.value = new_mode
-			config.plugins.Mosaic.howmanyscreens.save()
-			self.session.openWithCallback(
-				self.reload_plugin,
-				MessageBox,
-				_("Please restart the plugin to apply screen mode changes"),
-				MessageBox.TYPE_INFO
-			)
-		except Exception as e:
-			print(f"[Mosaic] Mode change error: {str(e)}")
-
-	def reload_plugin(self, ret=None):
-		self.close()
-
-	def showHelp(self):
-		help_text = (
-			_("CH+/CH- : countdown to next screen in secs (3-30)\n") +
-			_("Green   : play Mosaic\n") +
-			_("Yellow  : pause Mosaic\n") +
-			_("Blue    : toggle 9/4 screens\n") +
-			_("1-9(4)  : switch to screen 1-9(4) and leave\n") +
-			_("OK      : switch to current screen and leave\n") +
-			_("Exit    : leave to previously service\n") +
-			_("Help    : this help")
-		)
-		self.session.open(
-			MessageBox,
-			help_text,
-			MessageBox.TYPE_INFO,
-			close_on_any_key=True
-		)
-
 	def checkGrab(self):
-		""" Start the first service in the bouquet and show the service-name """
+		"""Initialize first channel capture"""
 		self.checkTimer.stop()  # Prevent re-entrancy
 		try:
-			with self.grab_lock:  # Protect critical section
-				# 1. Validate service list
-				if not isinstance(self.ref_list, list) or not self.ref_list:
-					raise ValueError("Invalid or empty channel list")
+			# Play next ref
+			ref = self.ref_list[self.current_refidx]
+			self.window_refs[0] = ref
+			info = self.serviceHandler.info(ref)
+			name = info.getName(ref).replace('\xc2\x86', '').replace('\xc2\x87', '')
+			event_name = self.getEventName(info)
 
-				# 2. Validate current index
-				if self.current_refidx >= len(self.ref_list):
-					self.current_refidx = 0
+			# first name screen
+			self.name_name_grab = (convtext(name))
+			print(f'[Mosaic] checkGrab name self.name_name_grab=:{str(self.name_name_grab)}')
 
-				# 3. Validate service reference
-				ref = self.ref_list[self.current_refidx]
-				if not ref.valid():
-					raise ValueError(f"Invalid service at index {self.current_refidx}")
-
-				# # Play next ref
-				# ref = self.ref_list[self.current_refidx]
-				self.window_refs[0] = ref
-
-				info = self.serviceHandler.info(ref)
-
-				if not info:
-					raise RuntimeError("Service info unavailable")
-
-				name = info.getName(ref).replace('\xc2\x86', '').replace('\xc2\x87', '')
-				event_name = self.getEventName(info)
-
-				# first name screen
-				self.name_name_grab = (convtext(name))
-				print(f'[Mosaic] checkGrab name self.name_name_grab=:{str(self.name_name_grab)}')
-
-				self["channel1"].setText(name)
-				self["event1"].setText(event_name)
-				self.session.nav.playService(ref)
-				self["count"].setText("Channel: " + "1 / " + str(len(self.ref_list)))
-				self.updateTimer.start(500, True)
+			self["channel1"].setText(name)
+			self["event1"].setText(event_name)
+			self.session.nav.playService(ref)
+			self["count"].setText("Channel: " + "1 / " + str(len(self.ref_list)))
+			self.updateTimer.start(100, True)
 		except Exception as e:
 			print(f'[Mosaic] error checkGrab:{str(e)}')
 
@@ -738,7 +609,39 @@ class Mosaic(Screen):
 
 	def exit(self, callback=None):
 		self.deleteConsoleCallbacks()
+		self.deletefilescreen()
+		self.delete_all_screenshots()
 		self.close()
+
+	def closeWithOldService(self):
+		try:
+			self.session.nav.playService(self.oldService)
+			self.deleteConsoleCallbacks()
+			self.deletefilescreen()
+			self.delete_all_screenshots()
+			self.close()
+		except:
+			pass
+
+	def delete_all_screenshots(self):
+		from glob import glob
+		self.directory = config.plugins.Mosaic.userfolder.value
+		for path in glob(self.directory + "/*"):
+			if isfile(path):
+				try:
+					remove(path)
+				except Exception as e:
+					print("[Mosaic] Failed to remove:", path, "-", str(e))
+
+	def deletefilescreen(self):
+		self.directory = '/tmp'
+		pattern = compile(r'^[0-9]+.*')
+		for filename in listdir(self.directory):
+			if pattern.match(filename):
+				file_path = join(self.directory, filename)
+				if isfile(file_path):
+					remove(file_path)
+					print(f'[Mosaic] Rimosso {file_path}')
 
 	def deleteConsoleCallbacks(self):
 		if self.MyConsoleCmd in self.MyConsole.appContainers:
@@ -763,28 +666,12 @@ class Mosaic(Screen):
 			except Exception as e:
 				print(f'[Mosaic] error del self.MyConsole.callbacks[self.MyConsoleCmd] {str(e)}')
 
-	def closeWithOldService(self):
-		try:
-			self.session.nav.playService(self.oldService)
-			self.deleteConsoleCallbacks()
-			self.deletefilescreen()
-			self.close()
-		except:
-			pass
+	# @property
+	# def max_windows(self):
+		# return self._max_windows
 
-	def deletefilescreen(self):
-		self.directory = '/tmp'
-		pattern = compile(r'^[0-9]+.*')
-		for filename in listdir(self.directory):
-			if pattern.match(filename):
-				file_path = join(self.directory, filename)
-				if isfile(file_path):
-					remove(file_path)
-					print(f'[Mosaic] Rimosso {file_path}')
-
-	@property
-	def max_windows(self):
-		return self._max_windows
+	def open_settings(self):
+		self.session.open(MosaicSettings)
 
 	def numberPressed(self, number):
 		"""Handle number key press"""
@@ -946,15 +833,16 @@ class Mosaic(Screen):
 
 				print(f'[Mosaic] makeNextScreenshot namepic {self.namepic}')
 				print(f'[Mosaic] Width screen -r %d self.windowWidth= {self.windowWidth}')
-
-				self.MyConsoleCmd = "%s -v -q -r %d -p /tmp/%s.png" % (grab_binary, self.windowWidth, self.namepic)
-				print(f'[Mosaic] self.MyConsoleCmd={self.MyConsoleCmd}')
-				self.MyConsole.ePopen(self.MyConsoleCmd, self.showNextScreenshot)
+				path_screenshots = config.plugins.Mosaic.userfolder.value
+				self.consoleCmd = "%s -v -q -r %d -p %s/%s.png" % (path_screenshots, grab_binary, self.windowWidth, self.namepic)
+				print(f'[Mosaic] self.consoleCmd={self.consoleCmd}')
+				self.MyConsole.ePopen(self.consoleCmd, self.showNextScreenshot)
 
 			except Exception as e:
 				print(f'[Mosaic] Error in makeNextScreenshot: {str(e)}')
 
 	def showNextScreenshot(self, result, retval, extra_args):
+		"""Handle captured screenshot"""
 		try:
 			if retval == 0:
 				""" Screenshot filename returned from the grab process """
@@ -1035,7 +923,7 @@ class Mosaic(Screen):
 				# Error handling if screenshot grab failed
 				print(("[Mosaic] retval: %d result: %s" % (retval, result)))
 				try:
-					with open("/tmp/mosaic.log", "a") as f:
+					with open(grab_errorlog, "a") as f:
 						f.write("retval: %d\nresult: %s" % (retval, result))
 				except:
 					pass
@@ -1051,10 +939,8 @@ class Mosaic(Screen):
 
 		except Exception as e:
 			print(f'[Mosaic] showNextScreenshot Error : {str(e)}')
-			pass
 
 	def updateCountdown(self, callback=None):
-		"""Handle countdown timer"""
 		try:
 			self.countdown -= 1
 			self.updateCountdownLabel()
@@ -1066,7 +952,7 @@ class Mosaic(Screen):
 			else:
 				self.updateTimer.start(1000, True)
 		except Exception as e:
-			print(f"[Mosaic] Countdown error: {str(e)}")
+			print(f'[Mosaic] Error in updateCountdown: {str(e)}')
 			self.working = False
 
 	def _update_info_labels(self, number):
@@ -1082,6 +968,42 @@ class Mosaic(Screen):
 			self["count"].setText(f"Channel: {number}/{self.max_windows}")
 		except Exception as e:
 			print(f'[Mosaic] Error updating labels: {str(e)}')
+
+	def toggleScreens(self):
+		"""Switch between 4/9 screen modes"""
+		try:
+			new_mode = 9 if config.plugins.Mosaic.howmanyscreens.value == 4 else 4
+			config.plugins.Mosaic.howmanyscreens.value = new_mode
+			config.plugins.Mosaic.howmanyscreens.save()
+			self.session.openWithCallback(
+				self.reload_plugin,
+				MessageBox,
+				_("Please restart the plugin to apply screen mode changes"),
+				MessageBox.TYPE_INFO
+			)
+		except Exception as e:
+			print(f"[Mosaic] Mode change error: {str(e)}")
+
+	def reload_plugin(self, ret=None):
+		self.close()
+
+	def showHelp(self):
+		help_text = (
+			_("CH+/CH- : countdown to next screen in secs (3-30)\n") +
+			_("Green   : play Mosaic\n") +
+			_("Yellow  : pause Mosaic\n") +
+			_("Blue    : toggle 9/4 screens\n") +
+			_("1-9(4)  : switch to screen 1-9(4) and leave\n") +
+			_("OK      : switch to current screen and leave\n") +
+			_("Exit    : leave to previously service\n") +
+			_("Help    : this help")
+		)
+		self.session.open(
+			MessageBox,
+			help_text,
+			MessageBox.TYPE_INFO,
+			close_on_any_key=True
+		)
 
 	def updateCountdownLabel(self):
 		try:
@@ -1112,15 +1034,39 @@ def trace_error():
 	try:
 		import traceback
 		traceback.print_exc(file=stdout)
-		with open("/tmp/mosaic.log", "a") as log_file:
+		with open(grab_errorlog, "a") as log_file:
 			traceback.print_exc(file=log_file)
 	except Exception as e:
 		print(f'[Mosaic] Failed to log the error: {str(e)}')
 
 
-def closeBouquetSelectorScreen(ret=None):
+def getBouquetServices(bouquet_ref):
+	"""Handle bouquet selection"""
+	try:
+		services = []
+		service_handler = eServiceCenter.getInstance()
+		servicelist = service_handler.list(bouquet_ref)
+		if servicelist:
+			service = servicelist.getNext()
+			while service.valid():
+				if not (service.flags & (eServiceReference.isDirectory | eServiceReference.isMarker)):
+					services.append(service)
+				service = servicelist.getNext()
+	except Exception as e:
+		print(f"[Mosaic] Error parsing bouquet_ref: {str(e)}")
+	return services
+
+
+def closeBouquetSelectorScreen(callback=None):
 	if BouquetSelectorScreen is not None:
 		BouquetSelectorScreen.close()
+
+
+def openMosaic(bouquet):
+	if bouquet is not None:
+		services = getBouquetServices(bouquet)
+		if len(services):
+			Session.openWithCallback(closeBouquetSelectorScreen, Mosaic, services)
 
 
 def main(session, **kwargs):

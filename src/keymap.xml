@@ -6,6 +6,15 @@
 		<key id="KEY_YELLOW" mapto="yellow" flags="m" />
 		<key id="KEY_CHANNELUP" mapto="channelup" flags="mr" />
 		<key id="KEY_CHANNELDOWN" mapto="channeldown" flags="mr" />
+		<key id="KEY_UP" mapto="up" flags="mr" />
+		<key id="KEY_MENU" mapto="menu" flags="m" />
+		<key id="KEY_MENU" mapto="MENU" flags="b" />
+<!--
+ 		<key id="KEY_LEFT" mapto="left" flags="mr" />
+		<key id="KEY_RIGHT" mapto="right" flags="mr" /> -->
+		<key id="KEY_DOWN" mapto="down" flags="mr" />
+		<key id="KEY_LEFT" mapto="left" flags="b" />
+		<key id="KEY_RIGHT" mapto="right" flags="b" />
 		<key id="KEY_BLUE" mapto="blue" flags="m" />
 		<key id="KEY_HELP" mapto="displayHelp" flags="m" />
 		<key id="KEY_1" mapto="1" flags="b" />
